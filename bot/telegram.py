@@ -55,7 +55,7 @@ class Telegram:
             if not source.is_relative_to(self.cfg.local_root) or source == self.cfg.local_root:
                 raise MediaError('Bot API вернул путь вне разрешённого каталога.')
             try:
-                if source.stat().st_size > self.cfg.max_bytes:
+                if self.cfg.max_bytes and source.stat().st_size > self.cfg.max_bytes:
                     raise MediaError('Файл превышает лимит этого сервера.')
                 with source.open('rb') as incoming, dest.open('wb') as outgoing:
                     while chunk := incoming.read(1024 * 1024):
@@ -72,7 +72,6 @@ class Telegram:
                 for chunk in response.iter_bytes(1024 * 256):
                     check(cancel, deadline)
                     total += len(chunk)
-                    if total > self.cfg.max_bytes:
+                    if self.cfg.max_bytes and total > self.cfg.max_bytes:
                         raise MediaError('Файл превышает лимит этого сервера.')
                     stream.write(chunk)
-

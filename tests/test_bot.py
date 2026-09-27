@@ -133,6 +133,32 @@ def test_config_cloud_limit(monkeypatch):
         assert Config.from_env().max_bytes == 20*1024*1024
 
 
+def test_no_fixed_limit_requires_local_api(tmp_path):
+    env = {'BOT_TOKEN': 'test', 'OWNER_ID': '123', 'MAX_INPUT_MB': '0'}
+    with patch.dict('os.environ', env, clear=True):
+        assert Config.from_env().max_bytes == 20 * 1024 * 1024
+    env.update(BOT_API_URL='http://127.0.0.1:8081', LOCAL_FILES_ROOT=str(tmp_path))
+    with patch.dict('os.environ', env, clear=True):
+        assert Config.from_env().max_bytes == 0
+
+
+def test_large_file_accepted_without_fixed_limit(cfg):
+    app = App(replace(cfg, max_bytes=0), FakeAPI())
+    app.accept(update(document={'file_id': 'big', 'file_size': 100 * 1024 * 1024}))
+    assert app.jobs.qsize() == 1
+
+
+def test_insufficient_disk_rejected_before_download(cfg, tmp_path):
+    app = App(replace(cfg, max_bytes=0, local_root=tmp_path), FakeAPI())
+    from collections import namedtuple
+    usage = namedtuple('usage', 'total used free')(100, 99, 1)
+    with patch('bot.app.shutil.disk_usage', return_value=usage):
+        with pytest.raises(MediaError, match='места'):
+            app.process({'file_id': 'big', 'file_size': 100000000, 'image': False,
+                         'cancel': threading.Event(), 'settings': app.settings})
+    assert not app.api.uploads
+
+
 def test_local_path_restriction(cfg, tmp_path):
     from bot.telegram import Telegram
     api = Telegram(replace(cfg, local_root=tmp_path/'allowed'))

@@ -81,7 +81,7 @@ class App:
                          or msg.get('video_note') or msg.get('document'))
                 if not media or not media.get('file_id'):
                     self.say('Пришлите видео или изображение. /start — помощь.')
-                elif media.get('file_size', 0) > self.cfg.max_bytes:
+                elif self.cfg.max_bytes and media.get('file_size', 0) > self.cfg.max_bytes:
                     self.say(f'Лимит этого размещения: {self.cfg.max_bytes // 1024 // 1024} МБ. '
                              'Увеличить его можно только вместе с возможностями сервера и Bot API.')
                 elif self.jobs.full():
@@ -92,6 +92,7 @@ class App:
                     suffix = Path(media.get('file_name', '')).suffix.lower()
                     is_image = is_image or suffix in {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tif', '.tiff'}
                     job = {'file_id': media['file_id'], 'image': is_image,
+                           'file_size': media.get('file_size', 0),
                            'settings': dict(self.settings), 'cancel': threading.Event()}
                     self.jobs.put_nowait(job)
                     self.say('Принято. Файлы обрабатываются по очереди; /cancel — отмена.')
@@ -107,8 +108,10 @@ class App:
         if cmd in ('/start', '/help'):
             self.say(HELP)
         elif cmd == '/status':
+            input_limit = (f'{self.cfg.max_bytes // 1024 // 1024} МБ' if self.cfg.max_bytes
+                           else 'по свободному диску и ресурсам сервера')
             self.say(f'{self.status}\nВ очереди: {self.jobs.qsize()}\n'
-                     f'Лимит входа: {self.cfg.max_bytes // 1024 // 1024} МБ; '
+                     f'Лимит входа: {input_limit}; '
                      f'выход фото: до {self.cfg.max_pixels / 1e6:g} Мп.\n'
                      f'Режим: {self.settings["mode"]}, ×{self.settings["scale"]}; '
                      f'кадр: {self.settings["fit"]}.')
@@ -140,6 +143,12 @@ class App:
     def process(self, job):
         deadline = time.monotonic() + self.cfg.job_seconds
         cancel, settings = job['cancel'], job['settings']
+        if self.cfg.local_root:
+            # Reserve space for the downloaded input, a working copy and one output.
+            available = min(shutil.disk_usage(self.cfg.work).free,
+                            shutil.disk_usage(self.cfg.local_root).free)
+            if 2 * job.get('file_size', 0) + 256 * 1024 * 1024 > available:
+                raise MediaError('На сервере сейчас недостаточно свободного места для этого файла.')
         with tempfile.TemporaryDirectory(prefix='job-', dir=self.cfg.work) as folder:
             folder = Path(folder)
             source = folder / 'input.bin'

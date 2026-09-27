@@ -41,7 +41,7 @@ class Config:
         root = os.environ.get('LOCAL_FILES_ROOT', '')
         limit = int(os.environ.get('MAX_INPUT_MB', '20')) * 1024 * 1024
         if urlparse(api).hostname == 'api.telegram.org':
-            limit = min(limit, 20 * 1024 * 1024)
+            limit = min(limit, 20 * 1024 * 1024) if limit else 20 * 1024 * 1024
         elif not root:
             raise ValueError('Custom local Bot API requires LOCAL_FILES_ROOT shared with the server.')
         cfg = cls(token, owner, secret, url, api, Path(root).resolve() if root else None,
@@ -52,7 +52,7 @@ class Config:
                   int(os.environ.get('VIDEO_SIZE', '640')),
                   int(os.environ.get('VIDEO_CRF', '18')),
                   int(os.environ.get('FFMPEG_THREADS', '1')), delivery)
-        if not (cfg.max_bytes > 0 and cfg.max_pixels > 0 and cfg.job_seconds > 0
+        if not (cfg.max_bytes >= 0 and cfg.max_pixels > 0 and cfg.job_seconds > 0
                 and 240 <= cfg.video_size <= 1080 and cfg.video_size % 2 == 0
                 and 16 <= cfg.crf <= 28 and 1 <= cfg.threads <= 8):
             raise ValueError('Invalid resource or encoding limits.')
