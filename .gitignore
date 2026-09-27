@@ -1,0 +1,11 @@
+.env
+.local-private/
+.venv/
+.tools/
+models/*.onnx
+models/*.pth
+__pycache__/
+.pytest_cache/
+pytest-cache-files-*/
+runtime/
+*.log

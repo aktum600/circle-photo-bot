@@ -1,0 +1,20 @@
+# Fallback only: 20 MB download limit, 512 MB memory, idle sleep.
+services:
+  - type: web
+    name: private-circle-photo-bot
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DELIVERY
+        value: webhook
+      - key: BOT_TOKEN
+        sync: false
+      - key: OWNER_ID
+        sync: false
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: MAX_INPUT_MB
+        value: "20"
+      - key: MAX_JOB_SECONDS
+        value: "660"

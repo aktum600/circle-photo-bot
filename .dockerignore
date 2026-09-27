@@ -1,0 +1,11 @@
+.git
+.env
+.local-private
+.venv
+.tools
+runtime
+models
+__pycache__
+tests
+.pytest_cache
+*.log
