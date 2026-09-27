@@ -51,6 +51,7 @@ class App:
         self.seen = OrderedDict()
         self.settings = {'mode': 'safe', 'scale': 2, 'fit': 'crop'}
         self.status = 'Готов к работе'
+        self.timings = {}
         self.ready = False
         self.worker = None
         purge_jobs(cfg.work)
@@ -97,6 +98,7 @@ class App:
                     is_image = is_image or suffix in {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tif', '.tiff'}
                     job = {'file_id': media['file_id'], 'image': is_image,
                            'file_size': media.get('file_size', 0),
+                           'queued_at': time.monotonic(),
                            'settings': dict(self.settings), 'cancel': threading.Event()}
                     self.jobs.put_nowait(job)
                     self.say('Принято. Файлы обрабатываются по очереди; /cancel — отмена.')
@@ -121,11 +123,13 @@ class App:
         elif cmd == '/status':
             input_limit = (f'{self.cfg.max_bytes // 1024 // 1024} МБ' if self.cfg.max_bytes
                            else 'по свободному диску и ресурсам сервера')
+            elapsed = ('\nВремя этапов: ' + ', '.join(f'{k}: {v:.1f} с' for k, v in list(self.timings.items()))
+                       if self.timings else '')
             self.say(f'{self.status}\nВ очереди: {self.jobs.qsize()}\n'
                      f'Лимит входа: {input_limit}; '
                      f'выход фото: до {self.cfg.max_pixels / 1e6:g} Мп.\n'
                      f'Режим: {self.settings["mode"]}, ×{self.settings["scale"]}; '
-                     f'кадр: {self.settings["fit"]}.')
+                     f'кадр: {self.settings["fit"]}.{elapsed}')
         elif cmd == '/cancel':
             if self.active:
                 self.active['cancel'].set()
@@ -152,6 +156,7 @@ class App:
             self.say('Неизвестная команда или параметр. /start — помощь.')
 
     def process(self, job):
+        self.timings = {'очередь': max(0, time.monotonic()-job.get('queued_at', time.monotonic()))}
         deadline = time.monotonic() + self.cfg.job_seconds
         cancel, settings = job['cancel'], job['settings']
         if self.cfg.local_root:
@@ -164,19 +169,26 @@ class App:
             folder = Path(folder)
             source = folder / 'input.bin'
             self.status = 'Скачиваю файл'
+            started = time.monotonic()
             self.api.download(job['file_id'], source, cancel, deadline)
+            self.timings['скачивание'] = time.monotonic()-started
             check(cancel, deadline)
             if job['image']:
                 self.status = 'Улучшаю изображение'
+                started = time.monotonic()
                 output = folder / 'enhanced.png'
                 run([sys.executable, '-m', 'bot.upscale', source, output,
                      '--mode', settings['mode'], '--scale', settings['scale'],
                      '--pixels', self.cfg.max_pixels, '--model', self.cfg.model], cancel, deadline,
                     stage='image')
+                self.timings['фото'] = time.monotonic()-started
                 if output.stat().st_size > 49 * 1024 * 1024:
                     raise MediaError('Изображение слишком велико для отправки. Уменьшите масштаб.')
                 check(cancel, deadline)
+                self.status = 'Отправляю фото'
+                started = time.monotonic()
                 self.api.upload(output, 'image', caption='Улучшенное изображение · ' + settings['mode'])
+                self.timings['отправка'] = time.monotonic()-started
                 return 1
             duration = probe(source, cancel, deadline)
             count = math.ceil(duration / 60)
@@ -184,9 +196,14 @@ class App:
             for i, start, length in segments(duration):
                 self.status = f'Готовлю кружок {i+1}/{count}'
                 output = folder / f'circle-{i+1:03}.mp4'
+                started = time.monotonic()
                 encode_segment(source, output, start, length, self.cfg, settings['fit'], cancel, deadline)
+                self.timings['кодирование'] = self.timings.get('кодирование', 0) + time.monotonic()-started
                 check(cancel, deadline)
+                self.status = f'Отправляю кружок {i+1}/{count}'
+                started = time.monotonic()
                 self.api.upload(output, 'video', duration=min(60, math.ceil(length)), length=self.cfg.video_size)
+                self.timings['отправка'] = self.timings.get('отправка', 0) + time.monotonic()-started
                 output.unlink()
                 if cancel.wait(1.1):
                     raise Cancelled('Задание отменено.')

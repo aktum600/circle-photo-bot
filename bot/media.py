@@ -112,18 +112,19 @@ def segments(duration):
 
 
 def video_filter(size, fit):
+    # Scale source frames before duplicating low-frame-rate input to 30 fps.
+    cadence = ',tpad=stop_mode=clone:stop_duration=1,fps=30'
     # Correct non-square source pixels before fitting. FFmpeg autorotates phone videos.
     prefix = 'scale=trunc(iw*sar/2)*2:ih,setsar=1,'
     if fit == 'crop':
         # Crop before scaling: largest centered square in display pixels,
         # including anamorphic SAR. Avoid a full-resolution intermediate scale.
         return ("crop=w='min(iw,ih/sar)':h='min(ih,iw*sar)':x='(iw-ow)/2':y='(ih-oh)/2',"
-                f'scale={size}:{size},setsar=1,tpad=stop_mode=clone:stop_duration=1,fps=30')
+                f'scale={size}:{size},setsar=1' + cadence)
     # Inscribe the complete frame into the visible circular area, including corners.
     inner = int(size / math.sqrt(2)) // 2 * 2
     return prefix + (f'scale={inner}:{inner}:force_original_aspect_ratio=decrease:force_divisible_by=2,'
-                     f'pad={size}:{size}:(ow-iw)/2:(oh-ih)/2:color=black,'
-                     'tpad=stop_mode=clone:stop_duration=1,fps=30')
+                     f'pad={size}:{size}:(ow-iw)/2:(oh-ih)/2:color=black') + cadence
 
 
 def encode_segment(source, output, start, duration, cfg, fit, cancel, deadline):
@@ -135,7 +136,7 @@ def encode_segment(source, output, start, duration, cfg, fit, cancel, deadline):
          '-ss', f'{start:.6f}', '-i', source, '-t', f'{duration:.6f}',
          '-map', '0:v:0', '-map', '0:a:0?', '-map_metadata', '-1', '-map_chapters', '-1',
          '-vf', video_filter(cfg.video_size, fit), '-filter_threads', '1',
-         '-c:v', 'libx264', '-preset', 'fast', '-crf', str(cfg.crf),
+         '-c:v', 'libx264', '-preset', cfg.video_preset, '-crf', str(cfg.crf),
          '-maxrate', str(rate), '-bufsize', str(rate * 2), '-threads', str(cfg.threads),
          '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
          '-af', 'aresample=async=1:first_pts=0', '-movflags', '+faststart', output],
