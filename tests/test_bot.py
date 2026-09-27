@@ -131,6 +131,7 @@ def test_cancel_and_deadline():
 def test_config_cloud_limit(monkeypatch):
     with patch.dict('os.environ', {'BOT_TOKEN': 'test', 'OWNER_ID': '123', 'MAX_INPUT_MB': '2048'}, clear=True):
         assert Config.from_env().max_bytes == 20*1024*1024
+        assert Config.from_env().output_max_bytes == 19*1024*1024
 
 
 def test_no_fixed_limit_requires_local_api(tmp_path):

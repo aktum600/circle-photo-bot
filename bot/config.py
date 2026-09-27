@@ -20,6 +20,7 @@ class Config:
     video_size: int = 640
     crf: int = 18
     threads: int = 1
+    output_max_bytes: int = 19 * 1024 * 1024
     delivery: str = 'polling'
 
     @classmethod
@@ -51,8 +52,10 @@ class Config:
                   int(os.environ.get('MAX_JOB_SECONDS', '660')),
                   int(os.environ.get('VIDEO_SIZE', '640')),
                   int(os.environ.get('VIDEO_CRF', '18')),
-                  int(os.environ.get('FFMPEG_THREADS', '1')), delivery)
-        if not (cfg.max_bytes >= 0 and cfg.max_pixels > 0 and cfg.job_seconds > 0
+                  int(os.environ.get('FFMPEG_THREADS', '1')),
+                  int(os.environ.get('OUTPUT_MAX_MB', '19')) * 1024 * 1024, delivery)
+        if not (cfg.max_bytes >= 0 and 5 * 1024 * 1024 <= cfg.output_max_bytes <= 49 * 1024 * 1024
+                and cfg.max_pixels > 0 and cfg.job_seconds > 0
                 and 240 <= cfg.video_size <= 1080 and cfg.video_size % 2 == 0
                 and 16 <= cfg.crf <= 28 and 1 <= cfg.threads <= 8):
             raise ValueError('Invalid resource or encoding limits.')

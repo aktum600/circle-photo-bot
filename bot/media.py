@@ -89,18 +89,21 @@ def video_filter(size, fit):
 
 
 def encode_segment(source, output, start, duration, cfg, fit, cancel, deadline):
+    # Reserve container overhead, audio and a two-second VBV burst. CRF keeps
+    # simple scenes small while the rate cap budgets complex scenes by duration.
+    rate = min(5_000_000, int(cfg.output_max_bytes * 8 * 0.92 / (duration + 2)) - 128_000)
     run([os.environ.get('FFMPEG', 'ffmpeg'), '-nostdin', '-v', 'error', '-y',
          '-threads', str(cfg.threads), '-protocol_whitelist', 'file,pipe',
          '-ss', f'{start:.6f}', '-i', source, '-t', f'{duration:.6f}',
          '-map', '0:v:0', '-map', '0:a:0?', '-map_metadata', '-1', '-map_chapters', '-1',
          '-vf', video_filter(cfg.video_size, fit), '-filter_threads', '1',
          '-c:v', 'libx264', '-preset', 'fast', '-crf', str(cfg.crf),
-         '-maxrate', '5M', '-bufsize', '10M', '-threads', str(cfg.threads),
+         '-maxrate', str(rate), '-bufsize', str(rate * 2), '-threads', str(cfg.threads),
          '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
          '-af', 'aresample=async=1:first_pts=0', '-movflags', '+faststart', output],
         cancel, deadline)
-    if output.stat().st_size > 49 * 1024 * 1024:
-        raise MediaError('Кружок получился слишком большим для отправки.')
+    if output.stat().st_size > cfg.output_max_bytes:
+        raise MediaError('Кружок превысил заданный размер. Попробуйте меньший фрагмент.')
     actual = probe(output, cancel, deadline)
     if actual > 60.05:
         raise MediaError('Не удалось соблюсти длительность кружка.')

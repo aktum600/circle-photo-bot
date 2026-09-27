@@ -82,8 +82,10 @@ class App:
                 if not media or not media.get('file_id'):
                     self.say('Пришлите видео или изображение. /start — помощь.')
                 elif self.cfg.max_bytes and media.get('file_size', 0) > self.cfg.max_bytes:
-                    self.say(f'Лимит этого размещения: {self.cfg.max_bytes // 1024 // 1024} МБ. '
-                             'Увеличить его можно только вместе с возможностями сервера и Bot API.')
+                    self.say('Этот файл больше 20 МБ, а официальный Telegram Bot API не передаёт '
+                             'такие входные файлы боту. Сожмите видео на телефоне/компьютере '
+                             'или отправьте его как видео в меньшем качестве — сжать файл после '
+                             'отправки бот не может, потому что он ещё не получил доступ к файлу.')
                 elif self.jobs.full():
                     # Reject with explicit message, not silent HTTP retries and reordered jobs.
                     self.say('Очередь заполнена. Дождитесь результата и отправьте файл ещё раз.')

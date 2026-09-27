@@ -34,6 +34,7 @@ def test_real_video_roundtrip(tmp_path, audio):
     for i, start, length in segments(duration):
         output = tmp_path/f'part-{i}.mp4'
         encode_segment(source, output, start, length, cfg, 'crop' if audio else 'contain', cancel, deadline)
+        assert output.stat().st_size <= cfg.output_max_bytes
         meta = json.loads(subprocess.check_output([ffprobe, '-v', 'error', '-show_streams',
                                                   '-show_format', '-of', 'json', str(output)]))
         video = next(s for s in meta['streams'] if s['codec_type'] == 'video')
