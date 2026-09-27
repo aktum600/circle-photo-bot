@@ -1,4 +1,17 @@
 BUTTONS = {
+    'Видео в кружок': '/video',
+    'Улучшить фото': '/photo',
+    'Настройки': '/settings',
+    'Помощь': '/help',
+    'Без нейросети': '/mode safe',
+    'С нейросетью': '/mode ai',
+    'Увеличение ×2': '/scale 2',
+    'Увеличение ×4': '/scale 4',
+    'Обрезать по центру': '/fit crop',
+    'Сохранить весь кадр': '/fit contain',
+    'Ход обработки': '/status',
+    'Отменить обработку': '/cancel',
+    'Назад в меню': '/menu',
     '🎬 Кружки': '/video',
     '🖼 Фото': '/photo',
     '✨ Нейроулучшение': '/mode ai',
@@ -12,8 +25,16 @@ BUTTONS = {
     '❓ Помощь': '/help',
 }
 KEYBOARD = {
-    'keyboard': [list(BUTTONS)[i:i+2] for i in range(0, len(BUTTONS), 2)],
+    'keyboard': [['Видео в кружок', 'Улучшить фото'], ['Настройки', 'Помощь']],
     'resize_keyboard': True,
-    'is_persistent': True,
+    'is_persistent': False,
+    'one_time_keyboard': True,
     'input_field_placeholder': 'Видео, фото или кнопка меню',
+}
+SETTINGS_KEYBOARD = {
+    **KEYBOARD,
+    'keyboard': [['Без нейросети', 'С нейросетью'],
+                 ['Увеличение ×2', 'Увеличение ×4'],
+                 ['Обрезать по центру', 'Сохранить весь кадр'],
+                 ['Ход обработки', 'Отменить обработку'], ['Назад в меню']],
 }

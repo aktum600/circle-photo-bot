@@ -17,7 +17,7 @@ from pathlib import Path
 from .config import Config
 from .media import Cancelled, MediaError, check, encode_segment, probe, run, segments
 from .telegram import Telegram
-from .menu import BUTTONS
+from .menu import BUTTONS, KEYBOARD, SETTINGS_KEYBOARD
 
 HELP = '''Пришлите видео — отправлю кружки по 60 секунд, по порядку.
 Фото можно отправить как фото или файл. Результат верну PNG-файлом.
@@ -56,9 +56,9 @@ class App:
         self.worker = None
         purge_jobs(cfg.work)
 
-    def say(self, text):
+    def say(self, text, reply_markup=None):
         try:
-            self.api.message(text)
+            self.api.message(text, reply_markup=reply_markup)
         except Exception:
             logging.warning('Telegram notification failed; content omitted')
 
@@ -111,8 +111,25 @@ class App:
         parts = text.split()
         cmd = parts[0].split('@')[0].lower()
         arg = parts[1].lower() if len(parts) == 2 else ''
-        if cmd in ('/start', '/help'):
-            self.say(HELP)
+        if cmd in ('/start', '/menu'):
+            self.say('Пришлите видео или фото до 20 МБ либо выберите действие.\n'
+                     'Меню сворачивается после выбора. Открыть его снова можно '
+                     'значком клавиатуры рядом с полем сообщения или командой /menu.', KEYBOARD)
+        elif cmd == '/help':
+            self.say('Видео в кружок — центральная обрезка без полей, части до 60 секунд.\n'
+                     'Улучшить фото — увеличение изображения с отправкой PNG-файла.\n'
+                     'Настройки — способ улучшения, увеличение и кадрирование.\n\n'
+                     'Можно сразу присылать файлы до 20 МБ, без нажатия кнопок. '
+                     'Нейросеть может менять мелкие детали. Рабочие файлы удаляются после обработки.\n'
+                     '/menu — главное меню, /status — ход обработки, /cancel — отмена.')
+        elif cmd == '/settings':
+            mode = 'без нейросети' if self.settings['mode'] == 'safe' else 'с нейросетью'
+            fit = 'обрезать по центру' if self.settings['fit'] == 'crop' else 'сохранить весь кадр'
+            self.say(f'Фото: {mode}, увеличение ×{self.settings["scale"]}.\n'
+                     f'Видео: {fit}.\n\n'
+                     'Без нейросети — бережное увеличение и резкость.\n'
+                     'С нейросетью — дорисовка деталей; может менять их и работает дольше.\n'
+                     'Сохранить весь кадр — добавить поля, чтобы края не обрезались.', SETTINGS_KEYBOARD)
         elif cmd == '/video':
             self.settings['fit'] = 'crop'
             self.say('Пришлите видео до 20 МБ. Возьму самый большой квадрат строго из центра '
@@ -145,13 +162,15 @@ class App:
                 self.say('Нейромодель пока не установлена на сервере. Доступен /mode safe.')
                 return
             self.settings['mode'] = arg
-            self.say('Режим установлен: ' + arg + ('. Нейросеть может изменять мелкие детали.' if arg == 'ai' else '.'))
+            self.say('Включено улучшение с нейросетью. Мелкие детали могут измениться.'
+                     if arg == 'ai' else 'Включено бережное улучшение без нейросети.')
         elif cmd == '/scale' and arg in ('2', '4'):
             self.settings['scale'] = int(arg)
             self.say(f'Увеличение ×{arg}, в пределах лимита разрешения сервера.')
         elif cmd == '/fit' and arg in ('crop', 'contain'):
             self.settings['fit'] = arg
-            self.say('Кадрирование установлено: ' + arg)
+            self.say('Видео будет обрезано по центральному квадрату без полей.'
+                     if arg == 'crop' else 'Весь кадр будет помещён в кружок с полями.')
         else:
             self.say('Неизвестная команда или параметр. /start — помощь.')
 

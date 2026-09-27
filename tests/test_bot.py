@@ -23,9 +23,11 @@ class FakeAPI:
     def __init__(self):
         self.messages = []
         self.uploads = []
+        self.markups = []
 
-    def message(self, text):
+    def message(self, text, reply_markup=None):
         self.messages.append(text)
+        self.markups.append(reply_markup)
 
     def download(self, file_id, dest, cancel, deadline):
         Image.new('RGB', (16, 12), 'red').save(dest, format='PNG')
@@ -143,6 +145,23 @@ def test_menu_owner_only(cfg):
     app.settings['fit'] = 'contain'
     app.accept(update(2, text='🎬 Кружки'))
     assert app.settings['fit'] == 'crop'
+
+
+def test_menu_only_opens_on_request(cfg):
+    api = FakeAPI()
+    app = App(cfg, api)
+    app.accept(update(text='/menu'))
+    assert len(api.markups[-1]['keyboard']) == 2
+    assert api.markups[-1]['one_time_keyboard']
+    assert not api.markups[-1]['is_persistent']
+    app.accept(update(2, text='Видео в кружок'))
+    assert api.markups[-1] is None
+    app.accept(update(3, text='Настройки'))
+    assert api.markups[-1]['keyboard'][-1] == ['Назад в меню']
+    app.accept(update(4, text='Увеличение ×4'))
+    assert app.settings['scale'] == 4 and api.markups[-1] is None
+    app.accept(update(5, text='Назад в меню'))
+    assert len(api.markups[-1]['keyboard']) == 2
 
 
 def test_large_ai_photo_uses_bounded_inference(tmp_path):
