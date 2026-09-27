@@ -17,6 +17,7 @@ from pathlib import Path
 from .config import Config
 from .media import Cancelled, MediaError, check, encode_segment, probe, run, segments
 from .telegram import Telegram
+from .menu import BUTTONS
 
 HELP = '''Пришлите видео — отправлю кружки по 60 секунд, по порядку.
 Фото можно отправить как фото или файл. Результат верну PNG-файлом.
@@ -73,6 +74,7 @@ class App:
             if uid in self.seen:
                 return True
             text = msg.get('text', '')
+            text = BUTTONS.get(text, text)
             if text.startswith('/'):
                 self.command(text)
             else:
@@ -109,6 +111,13 @@ class App:
         arg = parts[1].lower() if len(parts) == 2 else ''
         if cmd in ('/start', '/help'):
             self.say(HELP)
+        elif cmd == '/video':
+            self.settings['fit'] = 'crop'
+            self.say('Пришлите видео до 20 МБ. Возьму самый большой квадрат строго из центра '
+                     'кадра без полей и отправлю кружки по 60 секунд.')
+        elif cmd == '/photo':
+            self.say('Пришлите фото или изображение файлом. Режим улучшения и увеличение '
+                     'можно выбрать кнопками ниже. Результат придёт PNG-файлом.')
         elif cmd == '/status':
             input_limit = (f'{self.cfg.max_bytes // 1024 // 1024} МБ' if self.cfg.max_bytes
                            else 'по свободному диску и ресурсам сервера')
@@ -162,7 +171,8 @@ class App:
                 output = folder / 'enhanced.png'
                 run([sys.executable, '-m', 'bot.upscale', source, output,
                      '--mode', settings['mode'], '--scale', settings['scale'],
-                     '--pixels', self.cfg.max_pixels, '--model', self.cfg.model], cancel, deadline)
+                     '--pixels', self.cfg.max_pixels, '--model', self.cfg.model], cancel, deadline,
+                    stage='image')
                 if output.stat().st_size > 49 * 1024 * 1024:
                     raise MediaError('Изображение слишком велико для отправки. Уменьшите масштаб.')
                 check(cancel, deadline)

@@ -134,6 +134,39 @@ def test_config_cloud_limit(monkeypatch):
         assert Config.from_env().output_max_bytes == 19*1024*1024
 
 
+def test_menu_owner_only(cfg):
+    app = App(cfg, FakeAPI())
+    app.accept(update(owner=999, text='🔎 Увеличить ×4'))
+    assert app.settings['scale'] == 2
+    app.accept(update(text='🔎 Увеличить ×4'))
+    assert app.settings['scale'] == 4
+    app.settings['fit'] = 'contain'
+    app.accept(update(2, text='🎬 Кружки'))
+    assert app.settings['fit'] == 'crop'
+
+
+def test_large_ai_photo_uses_bounded_inference(tmp_path):
+    source, dest, model = tmp_path/'large.png', tmp_path/'out.png', tmp_path/'model.onnx'
+    Image.new('RGB', (1400, 1000), 'red').save(source)
+    model.touch()
+    def inference(image, model, size):
+        assert max(image.size) <= 512
+        return image.resize(size)
+    with patch('bot.upscale.neural', side_effect=inference) as neural:
+        upscale(source, dest, 'ai', 2, 8_000_000, model)
+        neural.assert_called_once()
+    with Image.open(dest) as result:
+        assert result.size == (2800, 2000)
+
+
+def test_worker_error_preserves_safe_diagnostic():
+    import sys
+    from bot.media import run
+    with pytest.raises(MediaError, match='Выберите'):
+        run([sys.executable, '-c', 'import sys; sys.exit(22)'], threading.Event(),
+            time.monotonic()+20, stage='image')
+
+
 def test_no_fixed_limit_requires_local_api(tmp_path):
     env = {'BOT_TOKEN': 'test', 'OWNER_ID': '123', 'MAX_INPUT_MB': '0'}
     with patch.dict('os.environ', env, clear=True):

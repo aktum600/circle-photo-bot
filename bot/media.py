@@ -4,6 +4,7 @@ import os
 import subprocess
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 
@@ -22,13 +23,45 @@ def check(cancel: threading.Event, deadline: float):
         raise MediaError('Превышено время обработки на этом сервере. Попробуйте меньший файл.')
 
 
-def run(args, cancel, deadline, capture=False):
+def process_error(code, stderr, stage):
+    if stage == 'image':
+        known = {
+            20: 'Изображение уже достигает предела разрешения этого сервера; увеличить его нельзя.',
+            21: 'Фото слишком велико для нейрообработки на бесплатном сервере. Выберите «Бережное улучшение».',
+            22: 'Нейромодель недоступна. Выберите «Бережное улучшение».',
+            23: 'Не удалось открыть изображение. Пришлите JPEG, PNG или WebP без анимации.',
+        }
+        if code in known:
+            return known[code]
+    detail = stderr.lower()
+    if code in (-9, 137) or b'cannot allocate memory' in detail or b'out of memory' in detail:
+        return 'Процесс остановлен сервером, возможно из-за нехватки памяти. Попробуйте меньшее разрешение.'
+    if b'no space left' in detail:
+        return 'На сервере закончилось свободное место. Попробуйте меньший файл.'
+    if b'unknown encoder' in detail or b'no such filter' in detail or b'option not found' in detail:
+        return 'На сервере недоступна нужная функция обработки. Сообщите разработчику код: MEDIA_FEATURE.'
+    if b'invalid data found' in detail or b'moov atom not found' in detail:
+        return 'Не удалось прочитать видео. Попробуйте заново отправить его как видео, а не файл.'
+    label = {'image': 'улучшение фото', 'probe': 'чтение видео', 'encode': 'создание кружка'}.get(stage, 'обработка')
+    return f'Не удалось выполнить этап «{label}». Код: {stage.upper()}_{code}. Попробуйте другой файл.'
+
+
+def run(args, cancel, deadline, capture=False, stage='media'):
     check(cancel, deadline)
     # Do not record command output: media metadata and private paths can be sensitive.
     process = subprocess.Popen([str(x) for x in args], stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL,
+                               stderr=subprocess.PIPE,
                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    # Drain stderr to bounded RAM; never store or expose paths or media metadata.
+    errors = deque(maxlen=8)
+    stderr_pipe = process.stderr
+    def drain():
+        while chunk := stderr_pipe.read(4096):
+            errors.append(chunk)
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+    process.stderr = None  # communicate must not race the draining thread.
     try:
         while True:
             check(cancel, deadline)
@@ -38,19 +71,22 @@ def run(args, cancel, deadline, capture=False):
             except subprocess.TimeoutExpired:
                 continue
         if process.returncode:
-            raise MediaError('Не удалось обработать файл: повреждение, неподдерживаемый формат или нехватка ресурсов.')
+            reader.join()
+            raise MediaError(process_error(process.returncode, b''.join(errors), stage))
         return stdout
     finally:
         if process.poll() is None:
             process.kill()
         process.wait()
+        reader.join()
+        stderr_pipe.close()
 
 
 def probe(path, cancel, deadline):
     raw = run([os.environ.get('FFPROBE', 'ffprobe'), '-v', 'error',
                '-protocol_whitelist', 'file,pipe', '-show_entries',
                'format=duration:stream=codec_type,width,height,duration', '-of', 'json', path],
-              cancel, deadline, capture=True)
+              cancel, deadline, capture=True, stage='probe')
     try:
         info = json.loads(raw)
         video = next(s for s in info['streams'] if s['codec_type'] == 'video')
@@ -79,8 +115,10 @@ def video_filter(size, fit):
     # Correct non-square source pixels before fitting. FFmpeg autorotates phone videos.
     prefix = 'scale=trunc(iw*sar/2)*2:ih,setsar=1,'
     if fit == 'crop':
-        return prefix + (f'scale={size}:{size}:force_original_aspect_ratio=increase,crop={size}:{size},'
-                         'tpad=stop_mode=clone:stop_duration=1,fps=30')
+        # Crop before scaling: largest centered square in display pixels,
+        # including anamorphic SAR. Avoid a full-resolution intermediate scale.
+        return ("crop=w='min(iw,ih/sar)':h='min(ih,iw*sar)':x='(iw-ow)/2':y='(ih-oh)/2',"
+                f'scale={size}:{size},setsar=1,tpad=stop_mode=clone:stop_duration=1,fps=30')
     # Inscribe the complete frame into the visible circular area, including corners.
     inner = int(size / math.sqrt(2)) // 2 * 2
     return prefix + (f'scale={inner}:{inner}:force_original_aspect_ratio=decrease:force_divisible_by=2,'
@@ -101,7 +139,7 @@ def encode_segment(source, output, start, duration, cfg, fit, cancel, deadline):
          '-maxrate', str(rate), '-bufsize', str(rate * 2), '-threads', str(cfg.threads),
          '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
          '-af', 'aresample=async=1:first_pts=0', '-movflags', '+faststart', output],
-        cancel, deadline)
+        cancel, deadline, stage='encode')
     if output.stat().st_size > cfg.output_max_bytes:
         raise MediaError('Кружок превысил заданный размер. Попробуйте меньший фрагмент.')
     actual = probe(output, cancel, deadline)

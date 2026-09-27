@@ -9,7 +9,28 @@ import time
 import pytest
 
 from bot.config import Config
-from bot.media import encode_segment, probe, segments
+from bot.media import encode_segment, probe, segments, video_filter
+
+
+@pytest.mark.parametrize('size', [(320, 180), (180, 320)])
+def test_center_square_fills_frame(tmp_path, size):
+    from PIL import Image, ImageDraw
+    ffmpeg = os.environ.get('FFMPEG') or shutil.which('ffmpeg')
+    if not ffmpeg:
+        pytest.skip('FFmpeg required')
+    source = tmp_path/'stripes.png'
+    w, h = size
+    edge = min(w, h)
+    x, y = (w-edge)//2, (h-edge)//2
+    image = Image.new('RGB', size, 'blue')
+    ImageDraw.Draw(image).rectangle((x, y, x+edge-1, y+edge-1), fill='red')
+    image.save(source)
+    raw = subprocess.check_output([ffmpeg, '-v', 'error', '-i', str(source),
+        '-vf', video_filter(640, 'crop'), '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
+    result = Image.frombytes('RGB', (640, 640), raw)
+    for point in [(10, 10), (320, 320), (629, 629)]:
+        red, green, blue = result.getpixel(point)
+        assert red > 240 and green < 15 and blue < 15
 
 
 @pytest.mark.parametrize('audio', [True, False])

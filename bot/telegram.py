@@ -6,6 +6,7 @@ from urllib.parse import quote
 import httpx
 
 from .media import MediaError, check
+from .menu import KEYBOARD
 
 
 class Telegram:
@@ -38,7 +39,8 @@ class Telegram:
         raise MediaError('Telegram отклонил запрос. Попробуйте позднее; для больших файлов нужен локальный Bot API.')
 
     def message(self, text):
-        return self.call('sendMessage', {'chat_id': self.cfg.owner, 'text': text})
+        return self.call('sendMessage', {'chat_id': self.cfg.owner, 'text': text,
+                                         'reply_markup': KEYBOARD})
 
     def upload(self, path, kind, **extra):
         method, field = ('sendVideoNote', 'video_note') if kind == 'video' else ('sendDocument', 'document')

@@ -2,6 +2,7 @@
 import argparse
 import math
 import warnings
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -11,11 +12,17 @@ Image.MAX_IMAGE_PIXELS = 40_000_000
 warnings.simplefilter('error', Image.DecompressionBombWarning)
 
 
+class ImageProblem(ValueError):
+    def __init__(self, code):
+        self.code = code
+        super().__init__('Image processing limit')
+
+
 def target_size(size, scale, max_pixels):
     w, h = size
     factor = min(scale, math.sqrt(max_pixels / (w * h)))
     if factor <= 1:
-        raise ValueError('Image already reaches the configured output pixel limit')
+        raise ImageProblem(20)
     return max(1, int(w * factor)), max(1, int(h * factor))
 
 
@@ -50,11 +57,9 @@ def neural(image, model, output_size):
 def upscale(source: Path, dest: Path, mode, scale, max_pixels, model):
     with Image.open(source) as opened:
         if getattr(opened, 'n_frames', 1) > 1:
-            raise ValueError('Animated images are not supported as photos')
+            raise ImageProblem(23)
         # Reject oversized headers before loading/copying all decoded pixels.
         target_size(opened.size, scale, max_pixels)
-        if mode == 'ai' and opened.width * opened.height * 16 > max_pixels * 2:
-            raise ValueError('Input too large for neural mode on this host; use safe mode')
         image = ImageOps.exif_transpose(opened)
         size = target_size(image.size, scale, max_pixels)
         alpha = image.convert('RGBA').getchannel('A') if 'A' in image.getbands() or 'transparency' in image.info else None
@@ -62,19 +67,20 @@ def upscale(source: Path, dest: Path, mode, scale, max_pixels, model):
     baseline = image.resize(size, Image.Resampling.LANCZOS)
     if mode == 'ai':
         if not model.is_file():
-            raise ValueError('Neural model is not installed')
-        # Bound the full x4 canvas as well as the final output.
-        if image.width * image.height * 16 > max_pixels * 2:
-            raise ValueError('Input too large for neural mode on this host; use safe mode')
-        enhanced = neural(image, model, size)
+            raise ImageProblem(22)
+        # Bound inference cost independently from source/output resolution.
+        # Keep original detail in the baseline; inference is only a gentle blend.
+        working = image.copy()
+        working.thumbnail((512, 512), Image.Resampling.LANCZOS)
+        enhanced = neural(working, model, size)
         result = Image.blend(baseline, enhanced, 0.45)
     else:
         result = baseline.filter(ImageFilter.UnsharpMask(radius=1.2, percent=65, threshold=4))
     if alpha is not None:
         result.putalpha(alpha.resize(size, Image.Resampling.LANCZOS))
     # A new image carries no EXIF, GPS, source ICC or textual metadata.
-    clean = Image.frombytes(result.mode, result.size, result.tobytes())
-    clean.save(dest, format='PNG', optimize=False)
+    result.info.clear()
+    result.save(dest, format='PNG', optimize=False)
 
 
 if __name__ == '__main__':
@@ -86,4 +92,9 @@ if __name__ == '__main__':
     parser.add_argument('--pixels', type=int, required=True)
     parser.add_argument('--model', type=Path, required=True)
     args = parser.parse_args()
-    upscale(args.source, args.dest, args.mode, args.scale, args.pixels, args.model)
+    try:
+        upscale(args.source, args.dest, args.mode, args.scale, args.pixels, args.model)
+    except ImageProblem as exc:
+        sys.exit(exc.code)
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning, OSError):
+        sys.exit(23)
